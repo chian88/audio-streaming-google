@@ -1,0 +1,20 @@
+{
+  "name": "audio-streaming-google",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google-cloud/speech": "^6.7.0",
+    "dotenv": "^17.4.1",
+    "express": "^5.2.1",
+    "ws": "^8.20.0"
+  }
+}

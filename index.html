@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Google Cloud Real-time Speech to Text</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+    background: #0f1117;
+    color: #e1e4e8;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 720px;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    color: #f0f2f5;
+  }
+
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding: 0.6rem 1rem;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    font-size: 0.8rem;
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #484f58;
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .status-dot.connecting { background: #d29922; }
+  .status-dot.connected  { background: #3fb950; }
+  .status-dot.recording  { background: #f85149; animation: pulse 1.2s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .status-text { flex: 1; color: #8b949e; }
+  .badge {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.5rem;
+    background: #21262d;
+    border-radius: 6px;
+    color: #8b949e;
+  }
+
+  .controls {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+
+  button {
+    padding: 0.65rem 1.5rem;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  button:active { transform: scale(0.97); }
+  button:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .btn-start { background: #238636; color: #fff; }
+  .btn-stop  { background: #da3633; color: #fff; }
+  .btn-copy  { background: #30363d; color: #e1e4e8; margin-left: auto; }
+  .btn-clear { background: #30363d; color: #e1e4e8; }
+
+  .transcript-section {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 1.25rem;
+    min-height: 200px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .transcript-section::-webkit-scrollbar { width: 6px; }
+  .transcript-section::-webkit-scrollbar-track { background: transparent; }
+  .transcript-section::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+  .transcript-committed {
+    font-size: 0.95rem;
+    line-height: 1.7;
+    color: #e1e4e8;
+  }
+
+  .transcript-interim {
+    font-size: 0.95rem;
+    line-height: 1.7;
+    color: #6e7681;
+    font-style: italic;
+  }
+
+  .transcript-placeholder {
+    color: #484f58;
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 3rem 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Google Cloud Real-time Speech to Text</h1>
+
+  <div class="status-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-text" id="statusText">Disconnected</span>
+    <span class="badge" id="latencyBadge">Latency: --</span>
+    <span class="badge" id="langBadge">Lang: --</span>
+    <span class="badge" id="modelBadge">Model: chirp_3</span>
+  </div>
+
+  <div class="controls">
+    <button class="btn-start" id="btnStart">Start Recording</button>
+    <button class="btn-stop" id="btnStop" disabled>Stop</button>
+    <button class="btn-clear" id="btnClear">Clear</button>
+    <button class="btn-copy" id="btnCopy">Copy</button>
+  </div>
+
+  <div class="transcript-section" id="transcriptSection">
+    <div class="transcript-placeholder" id="placeholder">Transcription will appear here...</div>
+    <div class="transcript-committed" id="committedText"></div>
+    <div class="transcript-interim" id="interimText"></div>
+  </div>
+</div>
+
+<script>
+const WORKLET_CODE = `
+class PCMProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this._buffer = [];
+    this._bufferSize = 3200; // 200ms at 16kHz
+  }
+
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || !input[0]) return true;
+
+    const samples = input[0];
+    for (let i = 0; i < samples.length; i++) {
+      this._buffer.push(samples[i]);
+    }
+
+    while (this._buffer.length >= this._bufferSize) {
+      const chunk = this._buffer.splice(0, this._bufferSize);
+      const int16 = new Int16Array(chunk.length);
+      for (let i = 0; i < chunk.length; i++) {
+        const s = Math.max(-1, Math.min(1, chunk[i]));
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      this.port.postMessage(int16.buffer, [int16.buffer]);
+    }
+
+    return true;
+  }
+}
+registerProcessor('pcm-processor', PCMProcessor);
+`;
+
+const $ = (sel) => document.querySelector(sel);
+
+const btnStart      = $('#btnStart');
+const btnStop       = $('#btnStop');
+const btnCopy       = $('#btnCopy');
+const btnClear      = $('#btnClear');
+const statusDot     = $('#statusDot');
+const statusText    = $('#statusText');
+const modelBadge    = $('#modelBadge');
+const latencyBadge  = $('#latencyBadge');
+const langBadge     = $('#langBadge');
+const committedEl   = $('#committedText');
+const interimEl     = $('#interimText');
+const placeholder   = $('#placeholder');
+const transcriptSection = $('#transcriptSection');
+
+let ws = null;
+let audioContext = null;
+let mediaStream = null;
+let workletNode = null;
+let committedTranscripts = [];
+let streamStartedAt = 0;
+let latencySamples = [];
+
+function setStatus(state, text) {
+  statusDot.className = 'status-dot ' + state;
+  statusText.textContent = text;
+}
+
+function updateTranscriptUI(interimText) {
+  const hasContent = committedTranscripts.length > 0 || interimText;
+  placeholder.style.display = hasContent ? 'none' : 'block';
+  committedEl.textContent = committedTranscripts.join(' ');
+  interimEl.textContent = interimText || '';
+  transcriptSection.scrollTop = transcriptSection.scrollHeight;
+}
+
+async function getToken() {
+  const resp = await fetch('/api/token');
+  const data = await resp.json();
+  return data.token;
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+async function startRecording() {
+  btnStart.disabled = true;
+  btnStop.disabled = false;
+  setStatus('connecting', 'Connecting...');
+
+  try {
+    const token = await getToken();
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`;
+
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      setStatus('connected', 'Connected — waiting for session...');
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'session_started') {
+        streamStartedAt = data.streamStartedAt;
+        modelBadge.textContent = 'Model: ' + (data.model || 'long');
+        setStatus('recording', 'Recording — speak now');
+        startMicrophone();
+      } else if (data.type === 'transcript') {
+        if (data.languageCode) {
+          langBadge.textContent = 'Lang: ' + data.languageCode;
+        }
+        if (data.isFinal) {
+          if (streamStartedAt > 0 && data.resultEndOffset) {
+            const offsetSec = parseFloat(data.resultEndOffset.seconds || 0)
+              + (data.resultEndOffset.nanos || 0) / 1e9;
+            const speechEndWallTime = streamStartedAt + offsetSec * 1000;
+            const latency = Math.round(Date.now() - speechEndWallTime);
+            latencySamples.push(latency);
+            if (latencySamples.length > 10) latencySamples.shift();
+            const avg = Math.round(latencySamples.reduce((a, b) => a + b, 0) / latencySamples.length);
+            latencyBadge.textContent = 'Latency: ' + avg + 'ms';
+          }
+          if (data.text.trim()) {
+            committedTranscripts.push(data.text.trim());
+          }
+          updateTranscriptUI('');
+        } else {
+          updateTranscriptUI(data.text);
+        }
+      } else if (data.type === 'error') {
+        console.error('Server error:', data.message);
+        stopRecording();
+      }
+    };
+
+    ws.onerror = () => stopRecording();
+
+    ws.onclose = () => {
+      cleanupAudio();
+      setStatus('', 'Disconnected');
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+    };
+
+  } catch {
+    stopRecording();
+  }
+}
+
+async function startMicrophone() {
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        sampleRate: 16000,
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      }
+    });
+
+    audioContext = new AudioContext({ sampleRate: 16000 });
+
+    const workletUrl = 'data:application/javascript,' + encodeURIComponent(WORKLET_CODE);
+    await audioContext.audioWorklet.addModule(workletUrl);
+
+    const source = audioContext.createMediaStreamSource(mediaStream);
+    workletNode = new AudioWorkletNode(audioContext, 'pcm-processor');
+
+    workletNode.port.onmessage = (event) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const base64Audio = arrayBufferToBase64(event.data);
+        ws.send(JSON.stringify({
+          type: 'audio',
+          data: base64Audio,
+        }));
+      }
+    };
+
+    source.connect(workletNode);
+    workletNode.connect(audioContext.destination);
+
+  } catch {
+    stopRecording();
+  }
+}
+
+function cleanupAudio() {
+  if (workletNode) {
+    workletNode.disconnect();
+    workletNode = null;
+  }
+  if (audioContext) {
+    audioContext.close().catch(() => {});
+    audioContext = null;
+  }
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+  }
+}
+
+function stopRecording() {
+  cleanupAudio();
+  if (ws) {
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'stop' }));
+      }
+      ws.close(1000);
+    } catch {}
+    ws = null;
+  }
+  streamStartedAt = 0;
+  latencySamples = [];
+  latencyBadge.textContent = 'Latency: --';
+  langBadge.textContent = 'Lang: --';
+  interimEl.textContent = '';
+  setStatus('', 'Disconnected');
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+}
+
+btnStart.addEventListener('click', startRecording);
+btnStop.addEventListener('click', stopRecording);
+
+btnCopy.addEventListener('click', () => {
+  const text = committedTranscripts.join(' ');
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    btnCopy.textContent = 'Copied!';
+    setTimeout(() => { btnCopy.textContent = 'Copy'; }, 1500);
+  });
+});
+
+btnClear.addEventListener('click', () => {
+  committedTranscripts = [];
+  committedEl.textContent = '';
+  interimEl.textContent = '';
+  placeholder.style.display = 'block';
+});
+</script>
+
+</body>
+</html>
