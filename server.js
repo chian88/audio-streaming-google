@@ -111,7 +111,8 @@ wss.on('connection', (ws) => {
     });
 
     const model = process.env.GOOGLE_CLOUD_STT_MODEL || 'chirp_3';
-
+    // https://docs.cloud.google.com/speech-to-text/docs/best-practices
+    // recommended 16k PCM
     const configRequest = {
       recognizer: `projects/${PROJECT_ID}/locations/${LOCATION}/recognizers/_`,
       streamingConfig: {
