@@ -20,7 +20,8 @@ const apiEndpoint = LOCATION === 'global'
   : `${LOCATION}-speech.googleapis.com`;
 const speechClientOptions = { apiEndpoint };
 if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON.trim().replace(/^'|'$/g, '');
+  const credentials = JSON.parse(raw);
   speechClientOptions.credentials = {
     client_email: credentials.client_email,
     private_key: credentials.private_key,
@@ -59,7 +60,10 @@ server.on('upgrade', (request, socket, head) => {
   }
   sessions.delete(token);
 
+  const lang = url.searchParams.get('lang') || 'auto';
+
   wss.handleUpgrade(request, socket, head, (ws) => {
+    ws.selectedLang = lang;
     wss.emit('connection', ws, request);
   });
 });
@@ -113,6 +117,8 @@ wss.on('connection', (ws) => {
     const model = process.env.GOOGLE_CLOUD_STT_MODEL || 'chirp_3';
     // https://docs.cloud.google.com/speech-to-text/docs/best-practices
     // recommended 16k PCM
+    const languageCodes = ws.selectedLang === 'auto' ? ['auto'] : [ws.selectedLang];
+
     const configRequest = {
       recognizer: `projects/${PROJECT_ID}/locations/${LOCATION}/recognizers/_`,
       streamingConfig: {
@@ -122,7 +128,7 @@ wss.on('connection', (ws) => {
             sampleRateHertz: 16000,
             audioChannelCount: 1,
           },
-          languageCodes: ['auto'],
+          languageCodes,
           model,
         },
         streamingFeatures: {

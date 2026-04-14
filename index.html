@@ -94,6 +94,25 @@
   .btn-copy  { background: #30363d; color: #e1e4e8; margin-left: auto; }
   .btn-clear { background: #30363d; color: #e1e4e8; }
 
+  select {
+    padding: 0.65rem 0.75rem;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: #21262d;
+    color: #e1e4e8;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b949e' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2rem;
+  }
+  select:focus { border-color: #58a6ff; }
+
   .transcript-section {
     background: #161b22;
     border: 1px solid #30363d;
@@ -143,6 +162,13 @@
   </div>
 
   <div class="controls">
+    <select id="langSelect">
+      <option value="auto">Auto Detect</option>
+      <option value="en-US">English</option>
+      <option value="cmn-Hans-CN">Chinese (Mandarin)</option>
+      <option value="ta-IN">Tamil</option>
+      <option value="ms-MY">Malay</option>
+    </select>
     <button class="btn-start" id="btnStart">Start Recording</button>
     <button class="btn-stop" id="btnStop" disabled>Stop</button>
     <button class="btn-clear" id="btnClear">Clear</button>
@@ -196,6 +222,7 @@ const btnStart      = $('#btnStart');
 const btnStop       = $('#btnStop');
 const btnCopy       = $('#btnCopy');
 const btnClear      = $('#btnClear');
+const langSelect    = $('#langSelect');
 const statusDot     = $('#statusDot');
 const statusText    = $('#statusText');
 const modelBadge    = $('#modelBadge');
@@ -245,13 +272,15 @@ function arrayBufferToBase64(buffer) {
 async function startRecording() {
   btnStart.disabled = true;
   btnStop.disabled = false;
+  langSelect.disabled = true;
   setStatus('connecting', 'Connecting...');
 
   try {
     const token = await getToken();
 
+    const lang = langSelect.value;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`;
+    const wsUrl = `${proto}//${location.host}/ws?token=${encodeURIComponent(token)}&lang=${encodeURIComponent(lang)}`;
 
     ws = new WebSocket(wsUrl);
 
@@ -381,6 +410,7 @@ function stopRecording() {
   setStatus('', 'Disconnected');
   btnStart.disabled = false;
   btnStop.disabled = true;
+  langSelect.disabled = false;
 }
 
 btnStart.addEventListener('click', startRecording);
