@@ -300,24 +300,20 @@ async function startRecording() {
         if (data.languageCode) {
           langBadge.textContent = 'Lang: ' + data.languageCode;
         }
-        if (data.isFinal) {
-          if (streamStartedAt > 0 && data.resultEndOffset) {
-            const offsetSec = parseFloat(data.resultEndOffset.seconds || 0)
-              + (data.resultEndOffset.nanos || 0) / 1e9;
-            const speechEndWallTime = streamStartedAt + offsetSec * 1000;
-            const latency = Math.round(Date.now() - speechEndWallTime);
-            latencySamples.push(latency);
-            if (latencySamples.length > 10) latencySamples.shift();
-            const avg = Math.round(latencySamples.reduce((a, b) => a + b, 0) / latencySamples.length);
-            latencyBadge.textContent = 'Latency: ' + avg + 'ms';
-          }
-          if (data.text.trim()) {
-            committedTranscripts.push(data.text.trim());
-          }
-          updateTranscriptUI('');
-        } else {
-          updateTranscriptUI(data.text);
+        if (streamStartedAt > 0 && data.resultEndOffset) {
+          const offsetSec = parseFloat(data.resultEndOffset.seconds || 0)
+            + (data.resultEndOffset.nanos || 0) / 1e9;
+          const speechEndWallTime = streamStartedAt + offsetSec * 1000;
+          const latency = Math.round(Date.now() - speechEndWallTime);
+          latencySamples.push(latency);
+          if (latencySamples.length > 10) latencySamples.shift();
+          const avg = Math.round(latencySamples.reduce((a, b) => a + b, 0) / latencySamples.length);
+          latencyBadge.textContent = 'Latency: ' + avg + 'ms';
         }
+        if (data.text.trim()) {
+          committedTranscripts.push(data.text.trim());
+        }
+        updateTranscriptUI('');
       } else if (data.type === 'error') {
         console.error('Server error:', data.message);
         stopRecording();

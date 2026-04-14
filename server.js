@@ -87,16 +87,16 @@ wss.on('connection', (ws) => {
       if (!response.results || response.results.length === 0) return;
 
       for (const result of response.results) {
+        if (!result.isFinal) continue;
         if (!result.alternatives || result.alternatives.length === 0) continue;
 
         const alt = result.alternatives[0];
         ws.send(JSON.stringify({
           type: 'transcript',
           text: alt.transcript,
-          isFinal: result.isFinal,
+          isFinal: true,
           confidence: alt.confidence,
           resultEndOffset: result.resultEndOffset,
-          stability: result.stability,
           languageCode: result.languageCode,
         }));
       }
